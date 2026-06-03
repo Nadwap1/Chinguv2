@@ -26,7 +26,7 @@ export default function Profile() {
           <View style={styles.heroCard}>
             <LinearGradient colors={["#FF2E93", "#8B5CF6"]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={StyleSheet.absoluteFill} />
             <Image source={{ uri: "https://images.pexels.com/photos/28408917/pexels-photo-28408917.jpeg" }} style={styles.heroAvatar} />
-            <Text style={styles.heroName}>Polyglot Guest</Text>
+            <Text style={styles.heroName}>Chingu Speak</Text>
             <Text style={styles.heroSub}>Talking to the world ✨</Text>
             <View style={styles.statRow}>
               <View style={styles.statBox}>
@@ -72,9 +72,7 @@ export default function Profile() {
             ))}
           </View>
 
-          <View style={styles.footer}>
-            <Text style={styles.footerText}>Powered by Gemini 3 Flash · OpenAI Whisper · OpenAI TTS</Text>
-          </View>
+          <View style={{ height: 8 }} />
         </ScrollView>
       </SafeAreaView>
     </View>
