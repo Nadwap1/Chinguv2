@@ -63,7 +63,8 @@
         {
           "cameraPermission": "Scan text with the camera to translate"
         }
-      ]
+      ],
+      "@react-native-community/datetimepicker"
     ],
     "experiments": {
       "typedRoutes": true

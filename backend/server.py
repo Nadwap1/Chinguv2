@@ -1,19 +1,23 @@
-from fastapi import FastAPI, APIRouter, HTTPException
-from fastapi.responses import JSONResponse
+from fastapi import FastAPI, APIRouter, HTTPException, Depends, status
+from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 import os
 import io
+import csv
 import json
 import base64
 import logging
 import tempfile
+import bcrypt
+import jwt
 from pathlib import Path
 from pydantic import BaseModel, Field
 from typing import List, Optional
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 from emergentintegrations.llm.chat import LlmChat, UserMessage, ImageContent
 from emergentintegrations.llm.openai.text_to_speech import OpenAITextToSpeech
@@ -31,6 +35,14 @@ db = client[os.environ["DB_NAME"]]
 EMERGENT_LLM_KEY = os.environ.get("EMERGENT_LLM_KEY", "")
 LLM_PROVIDER = "gemini"
 LLM_MODEL = "gemini-3-flash-preview"
+
+JWT_SECRET = os.environ.get("JWT_SECRET", "dev-secret-change-me")
+JWT_ALGO = "HS256"
+ADMIN_USERNAME = os.environ.get("ADMIN_USERNAME", "chingunadi")
+ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "0644782611")
+TOKEN_TTL_HOURS = 12
+LOCKOUT_LIMIT = 5
+LOCKOUT_MINUTES = 5
 
 logging.basicConfig(
     level=logging.INFO,
@@ -496,8 +508,6 @@ async def toggle_favorite(item_id: str):
     return {"id": item_id, "favorite": new_val}
 
 
-app.include_router(api_router)
-
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,
@@ -505,6 +515,186 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+# ------------------------- Admin (hidden) ------------------------- #
+
+bearer_scheme = HTTPBearer(auto_error=False)
+_failed_logins: dict = {}
+
+
+class AdminLogin(BaseModel):
+    username: str
+    password: str
+
+
+class AdminToken(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+
+
+@app.on_event("startup")
+async def seed_admin():
+    existing = await db.admins.find_one({"username": ADMIN_USERNAME}, {"_id": 0})
+    if existing:
+        return
+    hashed = bcrypt.hashpw(ADMIN_PASSWORD.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+    await db.admins.insert_one(
+        {
+            "username": ADMIN_USERNAME,
+            "password_hash": hashed,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        }
+    )
+    logger.info("Seeded admin user: %s", ADMIN_USERNAME)
+
+
+def _register_failure(username: str):
+    now = datetime.now(timezone.utc)
+    state = _failed_logins.get(username, {"count": 0, "locked_until": None})
+    state["count"] += 1
+    if state["count"] >= LOCKOUT_LIMIT:
+        state["locked_until"] = now + timedelta(minutes=LOCKOUT_MINUTES)
+    _failed_logins[username] = state
+
+
+def _is_locked(username: str) -> bool:
+    state = _failed_logins.get(username)
+    if not state or not state.get("locked_until"):
+        return False
+    if datetime.now(timezone.utc) < state["locked_until"]:
+        return True
+    _failed_logins.pop(username, None)
+    return False
+
+
+def _create_admin_token(username: str) -> str:
+    exp = datetime.now(timezone.utc) + timedelta(hours=TOKEN_TTL_HOURS)
+    payload = {"sub": username, "scope": "admin", "exp": exp}
+    return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGO)
+
+
+async def require_admin(creds: HTTPAuthorizationCredentials = Depends(bearer_scheme)) -> str:
+    if not creds:
+        raise HTTPException(status_code=401, detail="Missing admin token")
+    try:
+        payload = jwt.decode(creds.credentials, JWT_SECRET, algorithms=[JWT_ALGO])
+    except jwt.PyJWTError:
+        raise HTTPException(status_code=401, detail="Invalid or expired admin token")
+    if payload.get("scope") != "admin":
+        raise HTTPException(status_code=403, detail="Not an admin token")
+    return payload.get("sub")
+
+
+@api_router.post("/admin/login", response_model=AdminToken)
+async def admin_login(body: AdminLogin):
+    if _is_locked(body.username):
+        raise HTTPException(status_code=423, detail="Too many attempts. Locked for 5 minutes.")
+    doc = await db.admins.find_one({"username": body.username}, {"_id": 0})
+    if not doc:
+        _register_failure(body.username)
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+    ok = bcrypt.checkpw(body.password.encode("utf-8"), doc["password_hash"].encode("utf-8"))
+    if not ok:
+        _register_failure(body.username)
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+    _failed_logins.pop(body.username, None)
+    return AdminToken(access_token=_create_admin_token(body.username))
+
+
+@api_router.get("/admin/stats")
+async def admin_stats(_admin: str = Depends(require_admin)):
+    chat_count = await db.chat_sessions.count_documents({})
+    trans_count = await db.translations.count_documents({})
+    msg_count = 0
+    async for s in db.chat_sessions.find({}, {"_id": 0, "messages": 1}):
+        msg_count += len(s.get("messages", []))
+    return {
+        "conversations": chat_count,
+        "messages": msg_count,
+        "translations": trans_count,
+    }
+
+
+@api_router.get("/admin/conversations")
+async def admin_list_conversations(_admin: str = Depends(require_admin)):
+    items = []
+    async for s in db.chat_sessions.find({}, {"_id": 0}):
+        msgs = s.get("messages", [])
+        items.append(
+            {
+                "session_id": s.get("session_id"),
+                "practice_lang": s.get("practice_lang"),
+                "message_count": len(msgs),
+                "messages": msgs,
+                "last_ts": msgs[-1]["ts"] if msgs else None,
+            }
+        )
+    items.sort(key=lambda x: x.get("last_ts") or "", reverse=True)
+    return {"items": items}
+
+
+@api_router.delete("/admin/conversations/{session_id}")
+async def admin_delete_conversation(session_id: str, _admin: str = Depends(require_admin)):
+    res = await db.chat_sessions.delete_one({"session_id": session_id})
+    return {"deleted": res.deleted_count}
+
+
+@api_router.get("/admin/translations")
+async def admin_list_translations(_admin: str = Depends(require_admin), limit: int = 1000):
+    docs = await db.translations.find({}, {"_id": 0}).sort("created_at", -1).to_list(limit)
+    return {"items": docs}
+
+
+@api_router.delete("/admin/translations/{item_id}")
+async def admin_delete_translation(item_id: str, _admin: str = Depends(require_admin)):
+    res = await db.translations.delete_one({"id": item_id})
+    return {"deleted": res.deleted_count}
+
+
+@api_router.get("/admin/export")
+async def admin_export(
+    kind: str = "translations",
+    fmt: str = "json",
+    _admin: str = Depends(require_admin),
+):
+    if kind == "translations":
+        rows = await db.translations.find({}, {"_id": 0}).sort("created_at", -1).to_list(10000)
+    elif kind == "conversations":
+        rows = []
+        async for s in db.chat_sessions.find({}, {"_id": 0}):
+            for m in s.get("messages", []):
+                rows.append(
+                    {
+                        "session_id": s.get("session_id"),
+                        "practice_lang": s.get("practice_lang"),
+                        "role": m.get("role"),
+                        "content": m.get("content"),
+                        "ts": m.get("ts"),
+                    }
+                )
+    else:
+        raise HTTPException(status_code=400, detail="Unknown kind")
+
+    if fmt == "json":
+        return JSONResponse(content=rows)
+    if fmt == "csv":
+        buf = io.StringIO()
+        if rows:
+            writer = csv.DictWriter(buf, fieldnames=list(rows[0].keys()))
+            writer.writeheader()
+            for r in rows:
+                writer.writerow({k: ("" if v is None else str(v)) for k, v in r.items()})
+        data = buf.getvalue().encode("utf-8")
+        return StreamingResponse(
+            iter([data]),
+            media_type="text/csv",
+            headers={"Content-Disposition": f'attachment; filename="{kind}.csv"'},
+        )
+    raise HTTPException(status_code=400, detail="fmt must be json or csv")
+
+
+app.include_router(api_router)
 
 
 @app.on_event("shutdown")

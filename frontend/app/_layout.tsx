@@ -8,16 +8,13 @@ import { GestureHandlerRootView } from "react-native-gesture-handler";
 
 import { useIconFonts } from "@/src/hooks/use-icon-fonts";
 
-// Keep the native splash visible from cold start until icon fonts register.
 SplashScreen.preventAutoHideAsync();
 
 export default function RootLayout() {
   const [loaded, error] = useIconFonts();
 
   useEffect(() => {
-    if (loaded || error) {
-      SplashScreen.hideAsync();
-    }
+    if (loaded || error) SplashScreen.hideAsync();
   }, [loaded, error]);
 
   if (!loaded && !error) return null;
@@ -30,9 +27,15 @@ export default function RootLayout() {
           <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: "#0A0514" } }}>
             <Stack.Screen name="index" />
             <Stack.Screen name="(tabs)" />
+            <Stack.Screen name="voice" />
+            <Stack.Screen name="translate" />
             <Stack.Screen name="camera" options={{ presentation: "modal" }} />
             <Stack.Screen name="chat" />
             <Stack.Screen name="language-picker" options={{ presentation: "modal" }} />
+            <Stack.Screen name="settings" />
+            <Stack.Screen name="paywall" options={{ presentation: "modal" }} />
+            <Stack.Screen name="admin-login" />
+            <Stack.Screen name="admin" />
           </Stack>
         </KeyboardProvider>
       </SafeAreaProvider>

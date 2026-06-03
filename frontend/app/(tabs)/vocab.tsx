@@ -1,12 +1,5 @@
 import React from "react";
-import {
-  View,
-  Text,
-  StyleSheet,
-  FlatList,
-  TouchableOpacity,
-  RefreshControl,
-} from "react-native";
+import { View, Text, StyleSheet, FlatList, TouchableOpacity, RefreshControl } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons, Feather } from "@expo/vector-icons";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -15,7 +8,7 @@ import { useFocusEffect } from "expo-router";
 import { api, HistoryItem } from "@/src/api/client";
 import { getLanguage } from "@/src/constants/languages";
 
-export default function Saved() {
+export default function Vocab() {
   const [items, setItems] = React.useState<HistoryItem[]>([]);
   const [refreshing, setRefreshing] = React.useState(false);
   const [filter, setFilter] = React.useState<"all" | "favorites">("all");
@@ -24,23 +17,12 @@ export default function Saved() {
     try {
       const res = await api.listHistory();
       setItems(res.items);
-    } catch (e) {
-      console.warn(e);
-    }
+    } catch (e) { console.warn(e); }
   }, []);
 
-  useFocusEffect(
-    React.useCallback(() => {
-      load();
-    }, [load]),
-  );
+  useFocusEffect(React.useCallback(() => { load(); }, [load]));
 
-  const onRefresh = async () => {
-    setRefreshing(true);
-    await load();
-    setRefreshing(false);
-  };
-
+  const onRefresh = async () => { setRefreshing(true); await load(); setRefreshing(false); };
   const onFav = async (id: string) => {
     try {
       const r = await api.toggleFavorite(id);
@@ -48,10 +30,7 @@ export default function Saved() {
     } catch {}
   };
   const onDelete = async (id: string) => {
-    try {
-      await api.deleteHistory(id);
-      setItems((prev) => prev.filter((i) => i.id !== id));
-    } catch {}
+    try { await api.deleteHistory(id); setItems((prev) => prev.filter((i) => i.id !== id)); } catch {}
   };
 
   const shown = filter === "favorites" ? items.filter((i) => i.favorite) : items;
@@ -61,23 +40,15 @@ export default function Saved() {
       <LinearGradient colors={["#0A0514", "#160C28"]} style={StyleSheet.absoluteFill} />
       <SafeAreaView edges={["top"]} style={{ flex: 1 }}>
         <View style={styles.header}>
-          <Text style={styles.title}>Saved</Text>
-          <Text style={styles.subtitle}>Your translation history</Text>
+          <Text style={styles.title}>Vocab</Text>
+          <Text style={styles.subtitle}>Phrases you've learned</Text>
         </View>
 
         <View style={styles.filterRow}>
-          <TouchableOpacity
-            testID="filter-all"
-            style={[styles.chip, filter === "all" && styles.chipActive]}
-            onPress={() => setFilter("all")}
-          >
+          <TouchableOpacity testID="filter-all" style={[styles.chip, filter === "all" && styles.chipActive]} onPress={() => setFilter("all")}>
             <Text style={[styles.chipText, filter === "all" && styles.chipTextActive]}>All</Text>
           </TouchableOpacity>
-          <TouchableOpacity
-            testID="filter-favorites"
-            style={[styles.chip, filter === "favorites" && styles.chipActive]}
-            onPress={() => setFilter("favorites")}
-          >
+          <TouchableOpacity testID="filter-favorites" style={[styles.chip, filter === "favorites" && styles.chipActive]} onPress={() => setFilter("favorites")}>
             <Text style={[styles.chipText, filter === "favorites" && styles.chipTextActive]}>Favorites</Text>
           </TouchableOpacity>
         </View>
@@ -89,17 +60,15 @@ export default function Saved() {
           refreshControl={<RefreshControl tintColor="#fff" refreshing={refreshing} onRefresh={onRefresh} />}
           ListEmptyComponent={
             <View style={styles.empty}>
-              <Feather name="archive" size={32} color="#9CA3AF" />
-              <Text style={styles.emptyText}>
-                {filter === "favorites" ? "No favorites yet. Tap the star to save." : "No history yet."}
-              </Text>
+              <Feather name="book-open" size={32} color="#9CA3AF" />
+              <Text style={styles.emptyText}>{filter === "favorites" ? "No favorites yet — tap the star." : "Translate something to fill your vocab list."}</Text>
             </View>
           }
           renderItem={({ item }) => {
             const from = getLanguage(item.source_lang);
             const to = getLanguage(item.target_lang);
             return (
-              <View style={styles.card} testID={`saved-card-${item.id}`}>
+              <View style={styles.card} testID={`vocab-card-${item.id}`}>
                 <View style={styles.cardHead}>
                   <View style={styles.langTag}>
                     <Text style={styles.flag}>{from.flag}</Text>
@@ -107,11 +76,7 @@ export default function Saved() {
                     <Text style={styles.flag}>{to.flag}</Text>
                   </View>
                   <View style={styles.kind}>
-                    <Ionicons
-                      name={item.kind === "voice" ? "mic" : item.kind === "image" ? "camera" : "text"}
-                      size={12}
-                      color="#C9B8E4"
-                    />
+                    <Ionicons name={item.kind === "voice" ? "mic" : item.kind === "image" ? "camera" : "text"} size={12} color="#C9B8E4" />
                     <Text style={styles.kindText}>{item.kind.toUpperCase()}</Text>
                   </View>
                 </View>
@@ -119,18 +84,10 @@ export default function Saved() {
                 <View style={styles.divider} />
                 <Text style={styles.trans} numberOfLines={4}>{item.translated_text}</Text>
                 <View style={styles.cardActions}>
-                  <TouchableOpacity
-                    testID={`fav-${item.id}`}
-                    onPress={() => onFav(item.id)}
-                    style={styles.actBtn}
-                  >
+                  <TouchableOpacity testID={`fav-${item.id}`} onPress={() => onFav(item.id)} style={styles.actBtn}>
                     <Ionicons name={item.favorite ? "star" : "star-outline"} size={18} color={item.favorite ? "#FFD43B" : "#C9B8E4"} />
                   </TouchableOpacity>
-                  <TouchableOpacity
-                    testID={`del-${item.id}`}
-                    onPress={() => onDelete(item.id)}
-                    style={styles.actBtn}
-                  >
+                  <TouchableOpacity testID={`del-${item.id}`} onPress={() => onDelete(item.id)} style={styles.actBtn}>
                     <Feather name="trash-2" size={16} color="#C9B8E4" />
                   </TouchableOpacity>
                 </View>
@@ -149,42 +106,21 @@ const styles = StyleSheet.create({
   title: { color: "#fff", fontSize: 26, fontWeight: "800" },
   subtitle: { color: "#9CA3AF", fontSize: 13, marginTop: 4 },
   filterRow: { flexDirection: "row", gap: 10, paddingHorizontal: 20, marginBottom: 16 },
-  chip: {
-    paddingHorizontal: 18,
-    paddingVertical: 10,
-    borderRadius: 999,
-    backgroundColor: "rgba(255,255,255,0.05)",
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.1)",
-  },
-  chipActive: { backgroundColor: "#FF2E93", borderColor: "#FF2E93" },
+  chip: { paddingHorizontal: 18, paddingVertical: 10, borderRadius: 999, backgroundColor: "rgba(255,255,255,0.05)", borderWidth: 1, borderColor: "rgba(255,255,255,0.1)" },
+  chipActive: { backgroundColor: "#5B7CFA", borderColor: "#5B7CFA" },
   chipText: { color: "#9CA3AF", fontSize: 13, fontWeight: "600" },
   chipTextActive: { color: "#fff" },
-  card: {
-    backgroundColor: "rgba(255,255,255,0.05)",
-    borderRadius: 20,
-    padding: 16,
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.08)",
-    marginBottom: 12,
-  },
+  card: { backgroundColor: "rgba(255,255,255,0.05)", borderRadius: 20, padding: 16, borderWidth: 1, borderColor: "rgba(255,255,255,0.08)", marginBottom: 12 },
   cardHead: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 10 },
   langTag: { flexDirection: "row", alignItems: "center", gap: 6 },
   flag: { fontSize: 18 },
-  kind: { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 8, paddingVertical: 3, backgroundColor: "rgba(139,92,246,0.2)", borderRadius: 999 },
+  kind: { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 8, paddingVertical: 3, backgroundColor: "rgba(91,124,250,0.2)", borderRadius: 999 },
   kindText: { color: "#C9B8E4", fontSize: 9, fontWeight: "700" },
   src: { color: "#C9B8E4", fontSize: 14, lineHeight: 20 },
   divider: { height: 1, backgroundColor: "rgba(255,255,255,0.08)", marginVertical: 10 },
   trans: { color: "#fff", fontSize: 15, lineHeight: 22, fontWeight: "500" },
   cardActions: { flexDirection: "row", gap: 8, marginTop: 12, justifyContent: "flex-end" },
-  actBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: "rgba(255,255,255,0.05)",
-    alignItems: "center",
-    justifyContent: "center",
-  },
+  actBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: "rgba(255,255,255,0.05)", alignItems: "center", justifyContent: "center" },
   empty: { paddingTop: 80, alignItems: "center", gap: 12 },
-  emptyText: { color: "#9CA3AF", textAlign: "center" },
+  emptyText: { color: "#9CA3AF", textAlign: "center", paddingHorizontal: 40 },
 });

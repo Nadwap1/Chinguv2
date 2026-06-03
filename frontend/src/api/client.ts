@@ -88,4 +88,42 @@ export const api = {
 
   toggleFavorite: (id: string) =>
     request<{ id: string; favorite: boolean }>(`/history/${id}/favorite`, { method: "POST" }),
+
+  // Admin
+  adminLogin: (body: { username: string; password: string }) =>
+    request<{ access_token: string; token_type: string }>("/admin/login", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+
+  adminStats: (token: string) =>
+    request<{ conversations: number; messages: number; translations: number }>(
+      "/admin/stats",
+      { headers: { Authorization: `Bearer ${token}` } },
+    ),
+
+  adminConversations: (token: string) =>
+    request<{ items: any[] }>("/admin/conversations", {
+      headers: { Authorization: `Bearer ${token}` },
+    }),
+
+  adminTranslations: (token: string) =>
+    request<{ items: HistoryItem[] }>("/admin/translations", {
+      headers: { Authorization: `Bearer ${token}` },
+    }),
+
+  adminDeleteConversation: (token: string, session_id: string) =>
+    request<{ deleted: number }>(`/admin/conversations/${session_id}`, {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${token}` },
+    }),
+
+  adminDeleteTranslation: (token: string, id: string) =>
+    request<{ deleted: number }>(`/admin/translations/${id}`, {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${token}` },
+    }),
+
+  adminExportUrl: (token: string, kind: "translations" | "conversations", fmt: "json" | "csv") =>
+    `${API_BASE}/admin/export?kind=${kind}&fmt=${fmt}`,
 };
