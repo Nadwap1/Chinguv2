@@ -4,6 +4,7 @@ import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
+import { setIsPro } from "@/src/state/prefs";
 
 export default function Paywall() {
   const router = useRouter();
@@ -51,7 +52,7 @@ export default function Paywall() {
             <Text style={styles.checkText}>Cancel before billing to pay nothing</Text>
           </View>
 
-          <TouchableOpacity testID="paywall-cta" activeOpacity={0.9}>
+          <TouchableOpacity testID="paywall-cta" activeOpacity={0.9} onPress={async () => { await setIsPro(true); router.back(); }}>
             <LinearGradient colors={["#5B7CFA", "#4F6CE8"]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.cta}>
               <Text style={styles.ctaText}>Start My Free Week</Text>
             </LinearGradient>

@@ -36,6 +36,11 @@ export default function RootLayout() {
             <Stack.Screen name="paywall" options={{ presentation: "modal" }} />
             <Stack.Screen name="admin-login" />
             <Stack.Screen name="admin" />
+            <Stack.Screen name="auth" options={{ presentation: "modal" }} />
+            <Stack.Screen name="translate-screen" />
+            <Stack.Screen name="voice-screen" />
+            <Stack.Screen name="saved-screen" />
+            <Stack.Screen name="profile-screen" />
           </Stack>
         </KeyboardProvider>
       </SafeAreaProvider>

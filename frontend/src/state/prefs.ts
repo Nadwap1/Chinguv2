@@ -20,6 +20,10 @@ const REMIND_TIME_KEY = "chingu:remind_time";
 const STREAK_KEY = "chingu:streak";
 const STREAK_DATE_KEY = "chingu:streak_date";
 const ADMIN_TOKEN_KEY = "chingu:admin_token";
+const USER_TOKEN_KEY = "chingu:user_token";
+const USER_EMAIL_KEY = "chingu:user_email";
+const USER_NAME_KEY = "chingu:user_name";
+const IS_PRO_KEY = "chingu:is_pro";
 
 export type Prefs = {
   from: string;
@@ -40,6 +44,10 @@ export type Prefs = {
   streak: number;
   streakDate: string | null;
   adminToken: string | null;
+  userToken: string | null;
+  userEmail: string | null;
+  userName: string | null;
+  isPro: boolean;
 };
 
 let _state: Prefs = {
@@ -61,6 +69,10 @@ let _state: Prefs = {
   streak: 0,
   streakDate: null,
   adminToken: null,
+  userToken: null,
+  userEmail: null,
+  userName: null,
+  isPro: false,
 };
 
 const listeners: Set<() => void> = new Set();
@@ -72,9 +84,10 @@ export async function loadPrefs() {
     AI_VOICE_KEY, TEACH_STYLE_KEY, HANDS_FREE_KEY, KOR_PRON_KEY, KOR_TEACH_KEY,
     ES_TEACH_KEY, REMIND_DAILY_KEY, REMIND_SMART_KEY, REMIND_TIME_KEY,
     STREAK_KEY, STREAK_DATE_KEY, ADMIN_TOKEN_KEY,
+    USER_TOKEN_KEY, USER_EMAIL_KEY, USER_NAME_KEY, IS_PRO_KEY,
   ];
   const vals = await Promise.all(keys.map((k) => storage.getItem(k)));
-  const [f, t, c, s, lv, al, av, ts, hf, kp, kt, et, rd, rs, rt, st, sd, at] = vals;
+  const [f, t, c, s, lv, al, av, ts, hf, kp, kt, et, rd, rs, rt, st, sd, at, ut, ue, un, pro] = vals;
   if (f) _state.from = f;
   if (t) _state.to = t;
   if (c) _state.chatLang = c;
@@ -96,6 +109,10 @@ export async function loadPrefs() {
   if (st) _state.streak = parseInt(st, 10) || 0;
   if (sd) _state.streakDate = sd;
   if (at) _state.adminToken = at;
+  if (ut) _state.userToken = ut;
+  if (ue) _state.userEmail = ue;
+  if (un) _state.userName = un;
+  if (pro !== null) _state.isPro = pro === "1";
   emit();
 }
 
@@ -143,6 +160,20 @@ export async function setAdminToken(token: string | null) {
   _state.adminToken = token;
   if (token) await storage.setItem(ADMIN_TOKEN_KEY, token);
   else await storage.removeItem(ADMIN_TOKEN_KEY);
+  emit();
+}
+
+export async function setUser(token: string | null, email: string | null, name: string | null) {
+  _state.userToken = token; _state.userEmail = email; _state.userName = name;
+  if (token) await storage.setItem(USER_TOKEN_KEY, token); else await storage.removeItem(USER_TOKEN_KEY);
+  if (email) await storage.setItem(USER_EMAIL_KEY, email); else await storage.removeItem(USER_EMAIL_KEY);
+  if (name) await storage.setItem(USER_NAME_KEY, name); else await storage.removeItem(USER_NAME_KEY);
+  emit();
+}
+
+export async function setIsPro(v: boolean) {
+  _state.isPro = v;
+  await storage.setItem(IS_PRO_KEY, v ? "1" : "0");
   emit();
 }
 

@@ -694,6 +694,90 @@ async def admin_export(
     raise HTTPException(status_code=400, detail="fmt must be json or csv")
 
 
+# ------------------------- User Auth (optional) ------------------------- #
+
+class UserRegister(BaseModel):
+    email: str
+    password: str
+    name: Optional[str] = None
+
+
+class UserLogin(BaseModel):
+    email: str
+    password: str
+
+
+class UserOut(BaseModel):
+    id: str
+    email: str
+    name: Optional[str] = None
+
+
+class AuthOut(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+    user: UserOut
+
+
+def _create_user_token(user_id: str, email: str) -> str:
+    exp = datetime.now(timezone.utc) + timedelta(days=30)
+    payload = {"sub": user_id, "email": email, "scope": "user", "exp": exp}
+    return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGO)
+
+
+@api_router.post("/auth/register", response_model=AuthOut)
+async def register_user(body: UserRegister):
+    email = body.email.strip().lower()
+    if "@" not in email or len(body.password) < 6:
+        raise HTTPException(status_code=400, detail="Invalid email or password too short (min 6)")
+    existing = await db.users.find_one({"email": email}, {"_id": 0})
+    if existing:
+        raise HTTPException(status_code=409, detail="Email already registered")
+    hashed = bcrypt.hashpw(body.password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+    user_id = str(uuid.uuid4())
+    doc = {
+        "id": user_id,
+        "email": email,
+        "name": body.name,
+        "password_hash": hashed,
+        "is_pro": False,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    await db.users.insert_one(doc)
+    return AuthOut(
+        access_token=_create_user_token(user_id, email),
+        user=UserOut(id=user_id, email=email, name=body.name),
+    )
+
+
+@api_router.post("/auth/login", response_model=AuthOut)
+async def login_user(body: UserLogin):
+    email = body.email.strip().lower()
+    doc = await db.users.find_one({"email": email}, {"_id": 0})
+    if not doc or not bcrypt.checkpw(body.password.encode("utf-8"), doc["password_hash"].encode("utf-8")):
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+    return AuthOut(
+        access_token=_create_user_token(doc["id"], email),
+        user=UserOut(id=doc["id"], email=email, name=doc.get("name")),
+    )
+
+
+@api_router.get("/auth/me", response_model=UserOut)
+async def me(creds: HTTPAuthorizationCredentials = Depends(bearer_scheme)):
+    if not creds:
+        raise HTTPException(status_code=401, detail="Missing token")
+    try:
+        payload = jwt.decode(creds.credentials, JWT_SECRET, algorithms=[JWT_ALGO])
+    except jwt.PyJWTError:
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
+    if payload.get("scope") != "user":
+        raise HTTPException(status_code=403, detail="Not a user token")
+    doc = await db.users.find_one({"id": payload.get("sub")}, {"_id": 0, "password_hash": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="User not found")
+    return UserOut(id=doc["id"], email=doc["email"], name=doc.get("name"))
+
+
 app.include_router(api_router)
 
 

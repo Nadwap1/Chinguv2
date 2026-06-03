@@ -126,4 +126,14 @@ export const api = {
 
   adminExportUrl: (token: string, kind: "translations" | "conversations", fmt: "json" | "csv") =>
     `${API_BASE}/admin/export?kind=${kind}&fmt=${fmt}`,
+
+  // User auth
+  register: (body: { email: string; password: string; name?: string }) =>
+    request<{ access_token: string; user: { id: string; email: string; name?: string } }>(
+      "/auth/register", { method: "POST", body: JSON.stringify(body) },
+    ),
+  login: (body: { email: string; password: string }) =>
+    request<{ access_token: string; user: { id: string; email: string; name?: string } }>(
+      "/auth/login", { method: "POST", body: JSON.stringify(body) },
+    ),
 };
