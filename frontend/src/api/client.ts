@@ -128,6 +128,14 @@ export const api = {
     `${API_BASE}/admin/export?kind=${kind}&fmt=${fmt}`,
 
   // User auth
+  ping: () => request<{ status: string; service?: string; ts?: string }>("/ping"),
+
+  deleteAccount: (token: string | null) =>
+    request<{ deleted: boolean; guest: boolean; user_id?: string }>("/auth/delete-account", {
+      method: "DELETE",
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    }),
+
   register: (body: { email: string; password: string; name?: string }) =>
     request<{ access_token: string; user: { id: string; email: string; name?: string } }>(
       "/auth/register", { method: "POST", body: JSON.stringify(body) },

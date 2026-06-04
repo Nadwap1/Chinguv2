@@ -101,3 +101,133 @@
 #====================================================================================================
 # Testing Data - Main Agent and testing sub agent both should log testing data below this section
 #====================================================================================================
+
+
+user_problem_statement: "Test NEW/CHANGED Chingu Speak backend endpoints: ping, health, delete-account, admin login, CORS"
+
+backend:
+  - task: "GET /api/ping endpoint"
+    implemented: true
+    working: true
+    file: "/app/backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "testing"
+        comment: "✅ PASSED - Returns 200 with correct JSON structure {status: 'ok', service: 'chingu-speak', ts: ISO-8601}. Response time <500ms. Does NOT hit MongoDB (pure keep-alive)."
+
+  - task: "GET /api/health endpoint"
+    implemented: true
+    working: true
+    file: "/app/backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "testing"
+        comment: "✅ PASSED - Returns 200 with {status: 'ok'}."
+
+  - task: "DELETE /api/auth/delete-account (no token - guest)"
+    implemented: true
+    working: true
+    file: "/app/backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "testing"
+        comment: "✅ PASSED - Returns 200 with {deleted: true, guest: true} when no Authorization header provided."
+
+  - task: "DELETE /api/auth/delete-account (valid user token)"
+    implemented: true
+    working: true
+    file: "/app/backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "testing"
+        comment: "✅ PASSED - Registered new user, deleted account with valid JWT. Returns {deleted: true, guest: false, user_id: '...'}. Verified user document actually removed from MongoDB (GET /api/auth/me returns 404 after deletion)."
+
+  - task: "DELETE /api/auth/delete-account (invalid token)"
+    implemented: true
+    working: true
+    file: "/app/backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "testing"
+        comment: "✅ PASSED - Returns 401 when invalid/expired JWT token provided."
+
+  - task: "POST /api/admin/login (correct credentials)"
+    implemented: true
+    working: true
+    file: "/app/backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "testing"
+        comment: "✅ PASSED - Login with username='chingunadi', password='0644782611' returns 200 with JWT token. Token verified working against GET /api/admin/stats."
+
+  - task: "POST /api/admin/login (wrong password + lockout)"
+    implemented: true
+    working: true
+    file: "/app/backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "testing"
+        comment: "✅ PASSED - Wrong password returns 401. After 5 failed attempts, returns 423 (Locked) with appropriate error message."
+
+  - task: "CORS preflight on /api/ping"
+    implemented: true
+    working: true
+    file: "/app/backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "testing"
+        comment: "✅ PASSED - OPTIONS request from origin 'https://example.com' returns 204 with Access-Control-Allow-Origin header present (configured as '*')."
+
+frontend:
+  - task: "Frontend testing"
+    implemented: false
+    working: "NA"
+    file: "N/A"
+    stuck_count: 0
+    priority: "low"
+    needs_retesting: false
+    status_history:
+      - working: "NA"
+        agent: "testing"
+        comment: "Frontend testing explicitly skipped per review request instructions."
+
+metadata:
+  created_by: "testing_agent"
+  version: "1.0"
+  test_sequence: 1
+  run_ui: false
+
+test_plan:
+  current_focus:
+    - "All NEW/CHANGED endpoints tested and verified"
+  stuck_tasks: []
+  test_all: false
+  test_priority: "high_first"
+
+agent_communication:
+  - agent: "testing"
+    message: "Completed comprehensive testing of all 8 NEW/CHANGED backend endpoints. All tests PASSED. Test file created: /app/backend/tests/test_new_endpoints.py. All endpoints working correctly: ping (with <500ms response), health, delete-account (3 scenarios), admin login (with lockout), and CORS preflight. No critical issues found. Ready for production."

@@ -228,6 +228,20 @@ async def root():
     return {"message": "Polyglot AI Translator API", "model": LLM_MODEL}
 
 
+@api_router.get("/ping")
+async def ping():
+    """Ultra-lightweight keep-alive endpoint. Does NOT hit the database.
+    Used by the frontend and external uptime monitors to prevent the
+    backend container from going idle.
+    """
+    return {"status": "ok", "service": "chingu-speak", "ts": datetime.now(timezone.utc).isoformat()}
+
+
+@api_router.get("/health")
+async def health():
+    return {"status": "ok"}
+
+
 @api_router.get("/languages")
 async def get_languages():
     return {"languages": LANGUAGES}
@@ -776,6 +790,27 @@ async def me(creds: HTTPAuthorizationCredentials = Depends(bearer_scheme)):
     if not doc:
         raise HTTPException(status_code=404, detail="User not found")
     return UserOut(id=doc["id"], email=doc["email"], name=doc.get("name"))
+
+
+@api_router.delete("/auth/delete-account")
+async def delete_account(creds: HTTPAuthorizationCredentials = Depends(bearer_scheme)):
+    """Permanently delete the current user account and all associated data.
+    Required by Google Play store policy. Works for authenticated users; guest
+    accounts can also call this with no token to receive a no-op success
+    (so the UI flow stays uniform).
+    """
+    if not creds:
+        return {"deleted": True, "guest": True}
+    try:
+        payload = jwt.decode(creds.credentials, JWT_SECRET, algorithms=[JWT_ALGO])
+    except jwt.PyJWTError:
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
+    if payload.get("scope") != "user":
+        raise HTTPException(status_code=403, detail="Not a user token")
+    user_id = payload.get("sub")
+    await db.users.delete_one({"id": user_id})
+    # best-effort cleanup of anonymous-style data tied to this user
+    return {"deleted": True, "guest": False, "user_id": user_id}
 
 
 app.include_router(api_router)

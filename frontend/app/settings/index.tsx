@@ -1,11 +1,12 @@
 import React from "react";
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Linking } from "react-native";
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Linking, Alert } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons, Feather, MaterialIcons } from "@expo/vector-icons";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 
-import { usePrefs, loadPrefs } from "@/src/state/prefs";
+import { usePrefs, loadPrefs, setUser, setIsPro } from "@/src/state/prefs";
+import { api } from "@/src/api/client";
 import { getAppLang } from "@/src/constants/app-data";
 
 export default function Settings() {
@@ -15,6 +16,9 @@ export default function Settings() {
   React.useEffect(() => { loadPrefs(); }, []);
 
   const appLang = getAppLang(prefs.appLang);
+  const signedIn = !!prefs.userToken;
+  const accountSub = signedIn ? (prefs.userEmail || "Signed in") : "Guest account";
+  const displayName = prefs.userName || (signedIn ? (prefs.userEmail?.split("@")[0] || "Chingu Learner") : "Chingu Learner");
 
   const onAboutPress = () => {
     const n = aboutTaps + 1;
@@ -24,6 +28,54 @@ export default function Settings() {
       router.push(prefs.adminToken ? "/admin" : "/admin-login");
     }
     setTimeout(() => setAboutTaps(0), 2000);
+  };
+
+  const onSignOut = () => {
+    if (!signedIn) {
+      router.push("/auth");
+      return;
+    }
+    Alert.alert(
+      "Sign Out",
+      "Sign out of your Chingu Speak account? Your local history stays on this device.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Sign Out",
+          style: "destructive",
+          onPress: async () => {
+            await setUser(null, null, null);
+          },
+        },
+      ],
+    );
+  };
+
+  const onDeleteAccount = () => {
+    Alert.alert(
+      "Delete Account",
+      "This permanently deletes your account and removes your data from our servers. This action cannot be undone. Continue?",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Delete Permanently",
+          style: "destructive",
+          onPress: async () => {
+            try {
+              await api.deleteAccount(prefs.userToken);
+            } catch {
+              /* ignore network errors — still clear locally */
+            }
+            await setUser(null, null, null);
+            await setIsPro(false);
+            router.replace("/(tabs)");
+            setTimeout(() => {
+              Alert.alert("Account Deleted", "Your account has been deleted. You can keep using Chingu Speak as a guest.");
+            }, 300);
+          },
+        },
+      ],
+    );
   };
 
   return (
@@ -40,14 +92,14 @@ export default function Settings() {
 
         <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
           {/* Account */}
-          <TouchableOpacity testID="settings-account" style={styles.accountCard} activeOpacity={0.85}>
+          <TouchableOpacity testID="settings-account" style={styles.accountCard} activeOpacity={0.85} onPress={() => signedIn ? null : router.push("/auth")}>
             <View style={styles.avatar}>
               <LinearGradient colors={["#5B7CFA", "#8B5CF6"]} style={StyleSheet.absoluteFill} />
               <Ionicons name="person" size={22} color="#fff" />
             </View>
             <View style={{ flex: 1 }}>
-              <Text style={styles.accountName}>Chingu Learner</Text>
-              <Text style={styles.accountSub}>Guest account</Text>
+              <Text style={styles.accountName}>{displayName}</Text>
+              <Text style={styles.accountSub}>{accountSub}</Text>
             </View>
             <Feather name="chevron-right" size={18} color="#7A6E91" />
           </TouchableOpacity>
@@ -85,7 +137,7 @@ export default function Settings() {
 
           {/* Sign out */}
           <View style={styles.section}>
-            <SettingRow icon="log-out" label="Sign Out" onPress={() => {}} testID="settings-signout" />
+            <SettingRow icon={signedIn ? "log-out" : "log-in"} label={signedIn ? "Sign Out" : "Sign In or Create Account"} onPress={onSignOut} testID="settings-signout" />
           </View>
 
           {/* Legal */}
@@ -100,7 +152,7 @@ export default function Settings() {
           </View>
 
           {/* Delete account */}
-          <TouchableOpacity testID="settings-delete-account" style={styles.deleteRow} activeOpacity={0.7}>
+          <TouchableOpacity testID="settings-delete-account" style={styles.deleteRow} activeOpacity={0.7} onPress={onDeleteAccount}>
             <MaterialIcons name="delete-forever" size={20} color="#EF4444" />
             <Text style={styles.deleteText}>Delete Account</Text>
           </TouchableOpacity>

@@ -1,4 +1,11 @@
-name: Android Build
+name: Android APK (Tester Build)
+
+# Builds a sideloadable Debug APK from the Expo (React Native) frontend
+# so testers can install it directly without going through Google Play.
+#
+# Triggers:
+#   • Every push to main / master  → debug APK
+#   • Manual run (workflow_dispatch) → choose debug or release
 
 on:
   push:
@@ -8,72 +15,40 @@ on:
       build_type:
         description: 'Build type'
         required: true
-        default: 'release'
+        default: 'debug'
         type: choice
         options:
           - debug
           - release
 
-# Whenever this workflow runs from `push` to main/master we build the
-# signed AAB for Google Play. For `workflow_dispatch` we honour the
-# user's choice (debug or release).
 env:
-  SHOULD_BUILD_RELEASE: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.event.inputs.build_type == 'release') }}
-  SHOULD_BUILD_DEBUG:   ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.build_type == 'debug' }}
+  # Backend URL the APK should talk to. Override via repo secret EXPO_BACKEND_URL
+  # if you change deployments.
+  EXPO_PUBLIC_BACKEND_URL: ${{ secrets.EXPO_BACKEND_URL || 'https://71c655aa-3cdb-45d4-9a23-4a47a73e659e.preview.emergentagent.com' }}
+  BUILD_TYPE: ${{ github.event.inputs.build_type || 'debug' }}
 
 jobs:
-  build-android:
-    name: Build Android (AAB for Google Play)
+  build-apk:
+    name: Build Android APK (Expo prebuild + Gradle)
     runs-on: ubuntu-latest
+    timeout-minutes: 45
 
     steps:
-      - name: Checkout
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Locate frontend directory
-        id: locate
-        shell: bash
-        run: |
-          if [ -f "frontend/package.json" ]; then
-            FE_DIR="frontend"
-          elif [ -f "package.json" ]; then
-            FE_DIR="."
-          else
-            echo "::error::Could not find package.json in 'frontend/' or repo root"
-            exit 1
-          fi
-          echo "Frontend dir: $FE_DIR"
-          echo "dir=$FE_DIR" >> "$GITHUB_OUTPUT"
-
-      - name: Detect package manager
-        id: pm
-        shell: bash
-        working-directory: ${{ steps.locate.outputs.dir }}
-        run: |
-          if   [ -f "bun.lockb" ]         ; then PM=bun
-          elif [ -f "yarn.lock" ]         ; then PM=yarn
-          elif [ -f "pnpm-lock.yaml" ]    ; then PM=pnpm
-          elif [ -f "package-lock.json" ] ; then PM=npm
-          else                                  PM=npm
-          fi
-          echo "pm=$PM" >> "$GITHUB_OUTPUT"
-
-      - name: Setup Node.js
+      - name: Setup Node.js 20
         uses: actions/setup-node@v4
         with:
           node-version: '20'
+          cache: 'yarn'
+          cache-dependency-path: frontend/yarn.lock
 
-      - name: Setup Bun
-        if: steps.pm.outputs.pm == 'bun'
-        uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: latest
-
-      - name: Setup Java (JDK 21)
+      - name: Setup Java 17 (Temurin)
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
-          java-version: '21'
+          java-version: '17'
 
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
@@ -83,68 +58,45 @@ jobs:
       - name: Accept Android SDK licenses
         run: yes | sdkmanager --licenses >/dev/null 2>&1 || true
 
-      - name: Create .env for Vite build
-        working-directory: ${{ steps.locate.outputs.dir }}
+      - name: Write frontend .env (backend link)
+        working-directory: frontend
+        shell: bash
         run: |
           {
-            echo "VITE_BACKEND_URL=${{ secrets.VITE_BACKEND_URL || 'https://prmtly.com' }}"
-            echo "VITE_SUPABASE_URL=${{ secrets.VITE_SUPABASE_URL || 'https://placeholder.supabase.co' }}"
-            echo "VITE_SUPABASE_PUBLISHABLE_KEY=${{ secrets.VITE_SUPABASE_PUBLISHABLE_KEY || 'placeholder-anon-key' }}"
+            echo "EXPO_PUBLIC_BACKEND_URL=${{ env.EXPO_PUBLIC_BACKEND_URL }}"
           } > .env
+          echo "--- frontend/.env ---"
+          cat .env
 
-      - name: Install dependencies
-        working-directory: ${{ steps.locate.outputs.dir }}
+      - name: Install JS dependencies (yarn)
+        working-directory: frontend
         shell: bash
         run: |
-          case "${{ steps.pm.outputs.pm }}" in
-            bun)   bun install ;;
-            yarn)  corepack enable && yarn install --frozen-lockfile ;;
-            pnpm)  corepack enable && pnpm install --frozen-lockfile ;;
-            npm)
-              if [ -f package-lock.json ]; then
-                npm ci  --legacy-peer-deps --no-audit --no-fund \
-                  || npm install --legacy-peer-deps --no-audit --no-fund
-              else
-                npm install --legacy-peer-deps --no-audit --no-fund
-              fi
-              ;;
-          esac
+          if [ -f yarn.lock ]; then
+            corepack enable || true
+            yarn install --frozen-lockfile || yarn install
+          else
+            npm install --legacy-peer-deps --no-audit --no-fund
+          fi
 
-      # Use the LOCAL vite from node_modules (package.json: vite@^5.4.19).
-      # Previously used `npx --yes vite build` which downloaded Vite v8 (latest)
-      # into npx cache, causing "Cannot resolve entry module index.html" because
-      # Vite 8's entry resolution differs from 5.x.
-      - name: Build web bundle (Vite)
-        working-directory: ${{ steps.locate.outputs.dir }}
+      - name: Expo prebuild (generate native android/ folder)
+        working-directory: frontend
         shell: bash
         run: |
-          echo "=== node_modules/.bin/vite ==="
-          ls -la node_modules/.bin/vite 2>&1 || echo "vite NOT found in local node_modules"
-          echo "=== vite version (from package.json) ==="
-          node -e "console.log('declared:', require('./package.json').devDependencies?.vite || require('./package.json').dependencies?.vite)"
-          echo "=== installed vite version ==="
-          ./node_modules/.bin/vite --version || true
-          echo "=== running local vite build ==="
-          ./node_modules/.bin/vite build
+          npx --yes expo prebuild --platform android --no-install --clean
 
-      - name: Sync Capacitor Android
-        working-directory: ${{ steps.locate.outputs.dir }}
-        run: npx --yes cap sync android
-
-      # Safety-net for gradle-wrapper.jar (some repos gitignore *.jar)
-      - name: Ensure Gradle wrapper jar exists
-        working-directory: ${{ steps.locate.outputs.dir }}/android
+      - name: Ensure gradle-wrapper.jar exists
+        working-directory: frontend/android
         shell: bash
         run: |
           WRAPPER_JAR="gradle/wrapper/gradle-wrapper.jar"
           if [ -s "$WRAPPER_JAR" ]; then
-            echo "OK: gradle-wrapper.jar present"
+            echo "gradle-wrapper.jar present"
             exit 0
           fi
           RAW=$(grep -E '^distributionUrl=' gradle/wrapper/gradle-wrapper.properties | cut -d= -f2-)
           DIST_URL="${RAW//\\:/:}"
           VERSION=$(basename "$DIST_URL" | sed -E 's/^gradle-([0-9.]+[0-9]).*/\1/')
-          mkdir -p gradle/wrapper
           JAR_URL="https://raw.githubusercontent.com/gradle/gradle/v${VERSION}/gradle/wrapper/gradle-wrapper.jar"
           curl -fsSL --retry 3 "$JAR_URL" -o "$WRAPPER_JAR" || {
             TMPDIR="$(mktemp -d)"
@@ -152,190 +104,128 @@ jobs:
             unzip -p "$TMPDIR/gradle.zip" "gradle-${VERSION}/lib/plugins/gradle-wrapper.jar" > "$WRAPPER_JAR"
           }
 
-      - name: Grant gradlew execute permission
-        working-directory: ${{ steps.locate.outputs.dir }}
-        run: chmod +x android/gradlew
+      - name: Make gradlew executable
+        working-directory: frontend/android
+        run: chmod +x ./gradlew
 
-      # ─── DEBUG APK (only on manual dispatch with build_type=debug) ─────
-      - name: Build debug APK
-        if: env.SHOULD_BUILD_DEBUG == 'true'
-        working-directory: ${{ steps.locate.outputs.dir }}/android
-        run: ./gradlew assembleDebug --no-daemon --stacktrace
+      # ─── Debug APK ─────────────────────────────────────────────────────
+      - name: Build Debug APK
+        if: env.BUILD_TYPE == 'debug'
+        working-directory: frontend/android
+        shell: bash
+        env:
+          GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx4g -Dorg.gradle.daemon=false"
+        run: |
+          ./gradlew :app:assembleDebug --stacktrace --warning-mode=summary -x lint -x lintDebug
+          echo "--- output ---"
+          find app/build/outputs/apk/debug -type f -name '*.apk' -print
 
-      - name: Upload debug APK
-        if: env.SHOULD_BUILD_DEBUG == 'true'
+      - name: Rename debug APK
+        if: env.BUILD_TYPE == 'debug'
+        working-directory: frontend/android
+        shell: bash
+        run: |
+          mkdir -p ../../dist
+          cp app/build/outputs/apk/debug/app-debug.apk ../../dist/chingu-speak-debug.apk
+          ls -la ../../dist
+
+      - name: Upload Debug APK artifact
+        if: env.BUILD_TYPE == 'debug'
         uses: actions/upload-artifact@v4
         with:
-          name: app-debug-apk
-          path: ${{ steps.locate.outputs.dir }}/android/app/build/outputs/apk/debug/app-debug.apk
+          name: chingu-speak-debug-apk
+          path: dist/chingu-speak-debug.apk
           if-no-files-found: error
           retention-days: 30
 
-      # ─── RELEASE AAB (signed with Google Play upload key) ─────────────
-      - name: Prepare signing config
-        if: env.SHOULD_BUILD_RELEASE == 'true'
-        working-directory: ${{ steps.locate.outputs.dir }}/android
+      # ─── Release APK (optional, signed) ────────────────────────────────
+      - name: Prepare release signing config
+        if: env.BUILD_TYPE == 'release'
+        working-directory: frontend/android
+        shell: bash
         env:
           KEYSTORE_BASE64:   ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
           KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           KEY_PASSWORD:      ${{ secrets.ANDROID_KEY_PASSWORD }}
           KEY_ALIAS:         ${{ secrets.ANDROID_KEY_ALIAS }}
-        shell: bash
         run: |
           set -e
-          FALLBACK_PATH="$(pwd)/release.keystore"
-          FALLBACK_STORE_PASSWORD="NadiPlayer2026"
-          FALLBACK_KEY_PASSWORD="NadiPlayer2026"
-          FALLBACK_KEY_ALIAS="nadiplayer"
+          FALLBACK_STORE_PASSWORD="ChinguSpeak2025"
+          FALLBACK_KEY_PASSWORD="ChinguSpeak2025"
+          FALLBACK_KEY_ALIAS="chinguspeak"
 
-          USE_TIER=""
-
-          if [ -n "$KEYSTORE_BASE64" ] && [ -n "$KEYSTORE_PASSWORD" ] \
-             && [ -n "$KEY_PASSWORD" ] && [ -n "$KEY_ALIAS" ]; then
-            echo "─── Tier 1: attempting GitHub Secrets keystore ─────────"
+          if [ -n "$KEYSTORE_BASE64" ] && [ -n "$KEYSTORE_PASSWORD" ]; then
+            echo "Using GitHub Secret keystore"
             CLEAN_B64=$(printf '%s' "$KEYSTORE_BASE64" | tr -d ' \t\r\n')
-            printf '%s' "$CLEAN_B64" | base64 -d > release.keystore.secret 2>/dev/null || true
-            if [ -s release.keystore.secret ] && \
-               keytool -list -keystore release.keystore.secret \
-                       -storepass "$KEYSTORE_PASSWORD" -alias "$KEY_ALIAS" >/dev/null 2>&1; then
-              mv release.keystore.secret release.keystore
-              USE_TIER="secrets"
-              FINAL_STORE_PASSWORD="$KEYSTORE_PASSWORD"
-              FINAL_KEY_PASSWORD="$KEY_PASSWORD"
-              FINAL_KEY_ALIAS="$KEY_ALIAS"
-              echo "  ✅ Tier 1 OK — using repo secret keystore"
-            else
-              rm -f release.keystore.secret
-              echo "::warning::Tier 1 secrets failed. Falling through."
-            fi
-          fi
-
-          if [ -z "$USE_TIER" ] && [ -s "$FALLBACK_PATH" ]; then
-            echo "─── Tier 2: trying committed fallback keystore ─────────"
-            if keytool -list -keystore "$FALLBACK_PATH" \
-                       -storepass "$FALLBACK_STORE_PASSWORD" \
-                       -alias "$FALLBACK_KEY_ALIAS" >/dev/null 2>&1; then
-              USE_TIER="committed"
-              FINAL_STORE_PASSWORD="$FALLBACK_STORE_PASSWORD"
-              FINAL_KEY_PASSWORD="$FALLBACK_KEY_PASSWORD"
-              FINAL_KEY_ALIAS="$FALLBACK_KEY_ALIAS"
-              echo "  ✅ Tier 2 OK — using committed release.keystore"
-            fi
-          fi
-
-          if [ -z "$USE_TIER" ]; then
-            echo "─── Tier 3: generating ephemeral keystore on runner ───"
+            printf '%s' "$CLEAN_B64" | base64 -d > release.keystore
+            FINAL_STORE_PASSWORD="$KEYSTORE_PASSWORD"
+            FINAL_KEY_PASSWORD="$KEY_PASSWORD"
+            FINAL_KEY_ALIAS="$KEY_ALIAS"
+          else
+            echo "Generating ephemeral keystore for tester build (not for Play upload!)"
             keytool -genkeypair -v \
               -keystore release.keystore \
               -storepass "$FALLBACK_STORE_PASSWORD" \
               -keypass  "$FALLBACK_KEY_PASSWORD" \
               -alias    "$FALLBACK_KEY_ALIAS" \
               -keyalg RSA -keysize 2048 -validity 10950 \
-              -dname "CN=NadiPlayer, OU=Mobile, O=Nadi, L=Casablanca, ST=Casablanca, C=MA" \
+              -dname "CN=ChinguSpeak, OU=Mobile, O=Chingu, L=Casablanca, ST=Casablanca, C=MA" \
               -storetype PKCS12 2>&1 | tail -5
-            USE_TIER="ephemeral"
             FINAL_STORE_PASSWORD="$FALLBACK_STORE_PASSWORD"
             FINAL_KEY_PASSWORD="$FALLBACK_KEY_PASSWORD"
             FINAL_KEY_ALIAS="$FALLBACK_KEY_ALIAS"
           fi
-
           chmod 600 release.keystore
-          KEYSTORE_ABS_PATH="$(pwd)/release.keystore"
-
-          cat > keystore.properties <<EOF
-          storeFile=$KEYSTORE_ABS_PATH
-          storePassword=$FINAL_STORE_PASSWORD
-          keyAlias=$FINAL_KEY_ALIAS
-          keyPassword=$FINAL_KEY_PASSWORD
-          EOF
-          chmod 600 keystore.properties
-
           {
             echo "FINAL_STORE_PASSWORD=$FINAL_STORE_PASSWORD"
             echo "FINAL_KEY_PASSWORD=$FINAL_KEY_PASSWORD"
             echo "FINAL_KEY_ALIAS=$FINAL_KEY_ALIAS"
           } >> "$GITHUB_ENV"
 
-      - name: Build — Phase 1 / 3 — assembleDebug smoke-test
-        if: env.SHOULD_BUILD_RELEASE == 'true'
-        working-directory: ${{ steps.locate.outputs.dir }}/android
+      - name: Build Release APK
+        if: env.BUILD_TYPE == 'release'
+        working-directory: frontend/android
         shell: bash
+        env:
+          GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx4g -Dorg.gradle.daemon=false"
         run: |
-          set +e
-          ./gradlew assembleDebug \
-            --no-daemon --stacktrace --warning-mode=summary \
-            -x lint -x lintDebug -x lintVitalRelease -x lintRelease \
-            2>&1 | tee gradle-debug.log
-          RC=${PIPESTATUS[0]}
-          if [ "$RC" -ne 0 ]; then
-            awk '/^FAILURE:/{flag=1} flag{print; if (/^\* Try:/) {c++; if (c>=2) exit}}' gradle-debug.log | head -120
-            tail -80 gradle-debug.log
-            exit "$RC"
-          fi
-
-      - name: Build — Phase 2 / 3 — assembleRelease (signed APK)
-        if: env.SHOULD_BUILD_RELEASE == 'true'
-        working-directory: ${{ steps.locate.outputs.dir }}/android
-        shell: bash
-        run: |
-          set +e
-          ./gradlew assembleRelease \
-            --no-daemon --stacktrace --warning-mode=summary \
-            -x lint -x lintRelease -x lintVitalRelease \
+          ./gradlew :app:assembleRelease --stacktrace --warning-mode=summary -x lint -x lintRelease \
             -Pandroid.injected.signing.store.file="$(pwd)/release.keystore" \
             -Pandroid.injected.signing.store.password="${FINAL_STORE_PASSWORD}" \
             -Pandroid.injected.signing.key.alias="${FINAL_KEY_ALIAS}" \
-            -Pandroid.injected.signing.key.password="${FINAL_KEY_PASSWORD}" \
-            2>&1 | tee gradle-apk.log
-          RC=${PIPESTATUS[0]}
-          if [ "$RC" -ne 0 ]; then
-            awk '/^FAILURE:/{flag=1} flag{print; if (/^\* Try:/) {c++; if (c>=2) exit}}' gradle-apk.log | head -120
-            tail -80 gradle-apk.log
-            exit "$RC"
-          fi
+            -Pandroid.injected.signing.key.password="${FINAL_KEY_PASSWORD}"
           ls -la app/build/outputs/apk/release/
 
-      - name: Build — Phase 3 / 3 — bundleRelease (signed AAB for Play)
-        if: env.SHOULD_BUILD_RELEASE == 'true'
-        working-directory: ${{ steps.locate.outputs.dir }}/android
+      - name: Rename release APK
+        if: env.BUILD_TYPE == 'release'
+        working-directory: frontend/android
         shell: bash
         run: |
-          set +e
-          ./gradlew bundleRelease \
-            --no-daemon --stacktrace --warning-mode=summary \
-            -x lint -x lintRelease -x lintVitalRelease \
-            -Pandroid.injected.signing.store.file="$(pwd)/release.keystore" \
-            -Pandroid.injected.signing.store.password="${FINAL_STORE_PASSWORD}" \
-            -Pandroid.injected.signing.key.alias="${FINAL_KEY_ALIAS}" \
-            -Pandroid.injected.signing.key.password="${FINAL_KEY_PASSWORD}" \
-            2>&1 | tee gradle-aab.log
-          RC=${PIPESTATUS[0]}
-          if [ "$RC" -ne 0 ]; then
-            awk '/^FAILURE:/{flag=1} flag{print; if (/^\* Try:/) {c++; if (c>=2) exit}}' gradle-aab.log | head -120
-            tail -80 gradle-aab.log
-            exit "$RC"
-          fi
-          ls -la app/build/outputs/bundle/release/
+          mkdir -p ../../dist
+          # gradle outputs app-release.apk (signed)
+          cp app/build/outputs/apk/release/app-release.apk ../../dist/chingu-speak-release.apk
+          ls -la ../../dist
 
-      - name: Upload release AAB (Google Play)
-        if: env.SHOULD_BUILD_RELEASE == 'true'
+      - name: Upload Release APK artifact
+        if: env.BUILD_TYPE == 'release'
         uses: actions/upload-artifact@v4
         with:
-          name: app-release-aab
-          path: ${{ steps.locate.outputs.dir }}/android/app/build/outputs/bundle/release/*.aab
+          name: chingu-speak-release-apk
+          path: dist/chingu-speak-release.apk
           if-no-files-found: error
           retention-days: 90
 
-      - name: Upload release APK (sideload)
-        if: env.SHOULD_BUILD_RELEASE == 'true'
-        uses: actions/upload-artifact@v4
-        with:
-          name: app-release-apk
-          path: ${{ steps.locate.outputs.dir }}/android/app/build/outputs/apk/release/*.apk
-          if-no-files-found: error
-          retention-days: 90
-
-      - name: Clean up signing material
-        if: always() && env.SHOULD_BUILD_RELEASE == 'true'
-        working-directory: ${{ steps.locate.outputs.dir }}/android
-        run: rm -f keystore.properties || true
+      - name: Summary
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "## 📱 Chingu Speak — APK Build"
+            echo ""
+            echo "**Build type:** \`${BUILD_TYPE}\`"
+            echo ""
+            echo "**Backend URL baked in:** \`${EXPO_PUBLIC_BACKEND_URL}\`"
+            echo ""
+            echo "Download the artifact below and sideload to your Android device."
+            echo "On the device: enable **Install unknown apps** for your browser/file manager, then tap the APK."
+          } >> "$GITHUB_STEP_SUMMARY"
