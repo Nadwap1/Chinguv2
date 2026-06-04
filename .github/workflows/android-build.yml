@@ -41,8 +41,10 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-          cache: 'yarn'
-          cache-dependency-path: frontend/yarn.lock
+          # Cache intentionally disabled: the lockfile differs between
+          # local (yarn.lock) and the GitHub remote (package-lock.json).
+          # Caching is non-essential for a one-shot APK build and would
+          # fail the whole workflow if the file isn't found.
 
       - name: Setup Java 17 (Temurin)
         uses: actions/setup-java@v4
@@ -68,14 +70,20 @@ jobs:
           echo "--- frontend/.env ---"
           cat .env
 
-      - name: Install JS dependencies (yarn)
+      - name: Install JS dependencies (auto-detect npm / yarn)
         working-directory: frontend
         shell: bash
         run: |
-          if [ -f yarn.lock ]; then
+          set -e
+          if [ -f package-lock.json ]; then
+            echo "📦 Using npm (package-lock.json found)"
+            npm ci --legacy-peer-deps --no-audit --no-fund || npm install --legacy-peer-deps --no-audit --no-fund
+          elif [ -f yarn.lock ]; then
+            echo "📦 Using yarn (yarn.lock found)"
             corepack enable || true
             yarn install --frozen-lockfile || yarn install
           else
+            echo "⚠️  No lockfile found — falling back to plain npm install"
             npm install --legacy-peer-deps --no-audit --no-fund
           fi
 
