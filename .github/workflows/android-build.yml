@@ -148,19 +148,26 @@ jobs:
         run: |
           set -e
           GRADLE="android/app/build.gradle"
-          if grep -q "bundleInDebug" "$GRADLE"; then
-            echo "✓ bundleInDebug already configured"
+          # In modern React Native (0.81 / Expo SDK 54), debug variants are
+          # excluded from JS bundling by default. To make a debug APK that
+          # runs WITHOUT a Metro server (i.e. sideloadable), we need to set
+          # `debuggableVariants = []` inside the `react { }` block.
+          if grep -qE "^\s*debuggableVariants\s*=\s*\[\s*\]" "$GRADLE"; then
+            echo "✓ debuggableVariants already empty — debug will be bundled"
+          elif grep -qE "^\s*//\s*debuggableVariants" "$GRADLE"; then
+            # Replace the commented example line with the empty-list value
+            sed -i -E 's|^[[:space:]]*//[[:space:]]*debuggableVariants[[:space:]]*=.*|    debuggableVariants = []|' "$GRADLE"
+            echo "✓ Uncommented & set debuggableVariants = []"
           elif grep -qE "^react[[:space:]]*\{" "$GRADLE"; then
-            # Inject bundleInDebug = true into the existing `react {` block
-            sed -i -E 's|^(react[[:space:]]*\{)|\1\n    bundleInDebug = true|' "$GRADLE"
-            echo "✓ Injected bundleInDebug into existing react block"
+            # Inject a new line right after `react {`
+            sed -i -E '0,/^react[[:space:]]*\{/ s|^react[[:space:]]*\{|react {\n    debuggableVariants = []|' "$GRADLE"
+            echo "✓ Injected debuggableVariants = [] into react block"
           else
-            # Append a new react block at the end of the file
-            printf '\n\nreact {\n    bundleInDebug = true\n}\n' >> "$GRADLE"
-            echo "✓ Appended new react block with bundleInDebug"
+            echo "✗ Could not locate react { } block — debug APK may crash on launch"
+            exit 1
           fi
-          echo "--- verifying patch ---"
-          grep -nE "^react|bundleInDebug" "$GRADLE" || true
+          echo "--- patched build.gradle around debuggableVariants ---"
+          grep -nE "react[[:space:]]*\{|debuggableVariants" "$GRADLE" || true
 
       - name: Pre-bundle JS into native APK (debug standalone)
         if: env.BUILD_TYPE == 'debug'
