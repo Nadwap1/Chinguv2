@@ -141,6 +141,44 @@ jobs:
         run: chmod +x ./gradlew
 
       # ─── Debug APK ─────────────────────────────────────────────────────
+      - name: Enable JS bundling in debug variant (sideload-ready)
+        if: env.BUILD_TYPE == 'debug'
+        working-directory: frontend
+        shell: bash
+        run: |
+          set -e
+          GRADLE="android/app/build.gradle"
+          if grep -q "bundleInDebug" "$GRADLE"; then
+            echo "✓ bundleInDebug already configured"
+          elif grep -qE "^react[[:space:]]*\{" "$GRADLE"; then
+            # Inject bundleInDebug = true into the existing `react {` block
+            sed -i -E 's|^(react[[:space:]]*\{)|\1\n    bundleInDebug = true|' "$GRADLE"
+            echo "✓ Injected bundleInDebug into existing react block"
+          else
+            # Append a new react block at the end of the file
+            printf '\n\nreact {\n    bundleInDebug = true\n}\n' >> "$GRADLE"
+            echo "✓ Appended new react block with bundleInDebug"
+          fi
+          echo "--- verifying patch ---"
+          grep -nE "^react|bundleInDebug" "$GRADLE" || true
+
+      - name: Pre-bundle JS into native APK (debug standalone)
+        if: env.BUILD_TYPE == 'debug'
+        working-directory: frontend
+        shell: bash
+        run: |
+          set -e
+          mkdir -p android/app/src/main/assets
+          # Generate a production-style JS bundle directly into the standard
+          # React Native location so it ships inside the APK and the app can
+          # launch without a Metro dev server.
+          npx --yes expo export:embed \
+            --platform android \
+            --dev false \
+            --bundle-output android/app/src/main/assets/index.android.bundle \
+            --assets-dest android/app/src/main/res
+          ls -la android/app/src/main/assets/
+
       - name: Build Debug APK
         if: env.BUILD_TYPE == 'debug'
         working-directory: frontend/android
