@@ -87,6 +87,30 @@ jobs:
             npm install --legacy-peer-deps --no-audit --no-fund
           fi
 
+      - name: Ensure splash/icon assets exist (auto-heal)
+        working-directory: frontend
+        shell: bash
+        run: |
+          set -e
+          mkdir -p assets/images
+          # If splash-icon.png is missing but icon.png exists, copy icon → splash-icon
+          if [ ! -f assets/images/splash-icon.png ] && [ -f assets/images/icon.png ]; then
+            echo "⚠️  splash-icon.png missing — copying from icon.png"
+            cp assets/images/icon.png assets/images/splash-icon.png
+          fi
+          # Same defensive fallback for adaptive-icon
+          if [ ! -f assets/images/adaptive-icon.png ] && [ -f assets/images/icon.png ]; then
+            echo "⚠️  adaptive-icon.png missing — copying from icon.png"
+            cp assets/images/icon.png assets/images/adaptive-icon.png
+          fi
+          # And favicon
+          if [ ! -f assets/images/favicon.png ] && [ -f assets/images/icon.png ]; then
+            echo "⚠️  favicon.png missing — copying from icon.png"
+            cp assets/images/icon.png assets/images/favicon.png
+          fi
+          echo "--- assets/images/ ---"
+          ls -la assets/images/
+
       - name: Expo prebuild (generate native android/ folder)
         working-directory: frontend
         shell: bash
